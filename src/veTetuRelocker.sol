@@ -5,9 +5,7 @@
 
 pragma solidity ^0.8.13;
 
-//import "@openzeppelin/contracts/interfaces/IERC20.sol";
-
-import "../lib/openzeppelin-contracts/contracts/interfaces/IERC20.sol";
+import "@openzeppelin/contracts/interfaces/IERC20.sol";
 import "../lib/ops/contracts/integrations/OpsReady.sol";
 
 interface veTetu {
@@ -29,6 +27,7 @@ contract veTetuRelocker is OpsReady {
 
     uint internal constant MAX_TIME = 16 weeks;
     uint internal constant WEEK = 1 weeks;
+    uint public constant MIN_ALLOWANCE = 1000000000000000000;
 
     address public operator;
     uint[] public veNFTs;
@@ -91,7 +90,7 @@ contract veTetuRelocker is OpsReady {
         lockEnd = veTetu(VETETU).lockedEnd(veNFT);
         allowance = IERC20(WMATIC).allowance(veOwner, address(this));
 
-        if (targetTime > lockEnd && allowance > 0 && veTetu(VETETU).isApprovedOrOwner(address(this), veNFT)) {
+        if (targetTime > lockEnd && allowance > MIN_ALLOWANCE && veTetu(VETETU).isApprovedOrOwner(address(this), veNFT)) {
           return (true, veNFT);
         }
       }
