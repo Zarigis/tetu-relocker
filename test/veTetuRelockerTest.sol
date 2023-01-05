@@ -15,6 +15,24 @@ contract veTetuRelockerTest is Test {
     address public constant WMATIC = 0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270;
     uint constant WEEK = 1 weeks;
 
+    function testAddRemove() public {
+        uint veNFT = 96;
+        vm.createSelectFork(MATIC_RPC_URL, FORK_BLOCK_NUMBER);
+        veTetuRelocker c = new veTetuRelocker(USER);
+
+        vm.startPrank(USER);
+        veTetu(VETETU).setApprovalForAll(address(c), true);
+        uint sendAmount = 100000000000000000;
+        (bool s,) = payable(WMATIC).call{value: sendAmount}("");
+        require (s);
+        c.register(veNFT);
+
+        c.unregister(veNFT);
+
+
+
+    }
+
     function testLockerLogic() public {
         uint veNFT = 96;
 

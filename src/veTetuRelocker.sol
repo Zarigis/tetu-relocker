@@ -31,6 +31,7 @@ contract veTetuRelocker is OpsReady {
 
     address public operator;
     uint[] public veNFTs;
+    mapping(uint => uint) public veNFTtoIdx;
     bool public paused = false;
     
     constructor(address _taskCreator) OpsReady(OPS, _taskCreator) {
@@ -65,12 +66,19 @@ contract veTetuRelocker is OpsReady {
       require(veTetu(VETETU).isApprovedOrOwner(address(this), veNFT));
       idx = veNFTs.length;
       veNFTs.push(veNFT);
+      refreshIdx(idx);
+      return idx;
     }
 
-    function unregister(uint idx) external returns (bool) {
-      uint veNFT = veNFTs[idx];
+    function refreshIdx(uint idx) internal{
+      veNFTtoIdx[veNFTs[idx]] = idx;
+    }
+
+    function unregister(uint veNFT) public returns (bool) {
+      uint idx = veNFTtoIdx[veNFT];
       require(veTetu(VETETU).isApprovedOrOwner(msg.sender, veNFT));
       veNFTs[idx] = veNFTs[veNFTs.length - 1];
+      refreshIdx(idx);
       veNFTs.pop();
       return true;
     }
