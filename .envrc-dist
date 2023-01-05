@@ -1,0 +1,3 @@
+export ETH_RPC_URL=
+export MATIC_RPC_URL=
+export DEPLOYER_KEY=
