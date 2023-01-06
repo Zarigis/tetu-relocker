@@ -31,10 +31,11 @@ contract veTetuRelocker is OpsReady {
 
     address public operator;
     uint[] public veNFTs;
-    mapping(uint => uint) public veNFTtoIdx;
+    mapping(uint => uint) internal _veNFTtoIdx;
     bool public paused = false;
+    mapping(uint => uint) public coolDown;
     
-    constructor(address _taskCreator) OpsReady(OPS, _taskCreator) {
+    constructor(address ops, address _taskCreator) OpsReady(ops, _taskCreator) {
       operator = _taskCreator;
     }
 
@@ -59,6 +60,14 @@ contract veTetuRelocker is OpsReady {
       return true;
     }
 
+
+    function getExcessMatic() external returns (bool) {
+      require(msg.sender == operator);
+      uint expected = veNFTs.length * MIN_ALLOWANCE;
+      payable(operator).transfer(address(this).balance - expected);
+      return true;
+    }
+
     function register(uint veNFT) external returns (uint idx) {
       // sender must own the NFT
       require(veTetu(VETETU).isApprovedOrOwner(msg.sender, veNFT));
@@ -67,18 +76,47 @@ contract veTetuRelocker is OpsReady {
       idx = veNFTs.length;
       veNFTs.push(veNFT);
       refreshIdx(idx);
+      // ensure we have enough MATIC to unregister this user if they ever
+      // fail to be processed
+      IERC20(WMATIC).transferFrom(msg.sender, address(this), MIN_ALLOWANCE);
+      WMatic(WMATIC).withdraw(MIN_ALLOWANCE);
       return idx;
     }
 
-    function refreshIdx(uint idx) internal{
-      veNFTtoIdx[veNFTs[idx]] = idx;
+    function isRegistered(uint veNFT) public view returns (bool) {
+      uint idx = _veNFTtoIdx[veNFT];
+      return (idx > 0);
     }
 
-    function unregister(uint veNFT) public returns (bool) {
-      uint idx = veNFTtoIdx[veNFT];
+    function veNFTtoIdx(uint veNFT) public view returns (uint) {
+      uint idx = _veNFTtoIdx[veNFT];
+      require(idx > 0);
+      return (idx-1);
+    }
+
+    function refreshIdx(uint idx) internal{
+      _veNFTtoIdx[veNFTs[idx]] = (idx + 1);
+    }
+
+
+
+    function unregister(uint veNFT, address fee_return) public  returns (bool) { 
       require(veTetu(VETETU).isApprovedOrOwner(msg.sender, veNFT));
+      _unregister(veNFT);
+      // pay back register deposit
+      payable(fee_return).transfer(MIN_ALLOWANCE);
+      return true;
+    }
+
+    function unregister(uint veNFT) external returns (bool) {
+      return unregister(veNFT, msg.sender);
+    }
+
+    function _unregister(uint veNFT) internal returns (bool) {
+      uint idx = veNFTtoIdx(veNFT);
       veNFTs[idx] = veNFTs[veNFTs.length - 1];
       refreshIdx(idx);
+      _veNFTtoIdx[veNFT] = 0;
       veNFTs.pop();
       return true;
     }
@@ -91,18 +129,24 @@ contract veTetuRelocker is OpsReady {
       uint lockEnd;
       uint targetTime = (block.timestamp + MAX_TIME) / WEEK * WEEK;
       uint allowance;
+      uint balance;
 
       for(uint i = 0; i < veNFTs.length; i++){
         veNFT = veNFTs[i];
         veOwner = veTetu(VETETU).ownerOf(veNFT);
         lockEnd = veTetu(VETETU).lockedEnd(veNFT);
         allowance = IERC20(WMATIC).allowance(veOwner, address(this));
+        balance = IERC20(WMATIC).balanceOf(veOwner);
 
-        if (targetTime > lockEnd && allowance > MIN_ALLOWANCE && veTetu(VETETU).isApprovedOrOwner(address(this), veNFT)) {
+        if (targetTime > lockEnd && allowance > MIN_ALLOWANCE && balance >= MIN_ALLOWANCE && veTetu(VETETU).isApprovedOrOwner(address(this), veNFT) && isOffCooldown(veNFT)) {
           return (true, veNFT);
         }
       }
       return (false, 0);
+    }
+
+    function isOffCooldown(uint veNFT) public view returns (bool) {
+      return (coolDown[veNFT] == 0 || coolDown[veNFT] >= block.timestamp);
     }
     
     // for gelato resolver
@@ -122,18 +166,41 @@ contract veTetuRelocker is OpsReady {
 
     function processLock(uint veNFT) external onlyDedicatedMsgSender returns (bool) {
       require(!paused);
-
-      address veOwner = veTetu(VETETU).ownerOf(veNFT);
+      require(isRegistered(veNFT));
+      
       (uint256 fee,address feeToken) = _getFeeDetails();
-      require(feeToken == ETH || (fee == 0 && feeToken == address(0)));
+      require(feeToken == ETH);
+      address veOwner = veTetu(VETETU).ownerOf(veNFT);
 
-      IERC20(WMATIC).transferFrom(veOwner, address(this), fee);
-      WMatic(WMATIC).withdraw(fee);
-      veTetu(VETETU).increaseUnlockTime(veNFT, MAX_TIME);
-
-      if (feeToken != address(0)){
+      try IERC20(WMATIC).transferFrom(veOwner, address(this), fee) { } catch {
+        // failed to retrieve the required fees from the owner, so we unregister them
+        // using their initial deposit
+        require (fee <= MIN_ALLOWANCE);
+        (payable(veOwner).send(MIN_ALLOWANCE - fee));
+        _unregister(veNFT);
         _transfer(fee,feeToken);
+        return true;
       }
+      WMatic(WMATIC).withdraw(fee);
+
+      // if this contract is no longer an approved operator, then
+      // we just unregister the NFT (paying back the user their deposit, since the 
+      // transaction fee was paid)
+      
+      if (!veTetu(VETETU).isApprovedOrOwner(address(this), veNFT)) {
+        (payable(veOwner).send(MIN_ALLOWANCE));
+        _unregister(veNFT);
+        _transfer(fee,feeToken);
+        return true;
+      }
+
+      try veTetu(VETETU).increaseUnlockTime(veNFT, MAX_TIME) { } catch {
+          // if increasing the unlock fails, try again in a day
+          // in practice this shouldn't happen, but it's technically
+          // possible
+          coolDown[veNFT] = block.timestamp + 1 days;
+        }
+      _transfer(fee,feeToken);
       return true;
     }
 
