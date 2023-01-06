@@ -53,7 +53,6 @@ contract veTetuRelocker is OpsReady {
     uint[] public veNFTs;
     mapping(uint => uint) internal _veNFTtoIdx;
     bool public paused = false;
-    mapping(uint => uint) public coolDown;
     mapping(uint => uint) public balances;
 
     constructor(address ops, address _taskCreator) OpsReady(ops, _taskCreator) {
@@ -226,7 +225,12 @@ contract veTetuRelocker is OpsReady {
       uint targetTime = (block.timestamp + MAX_TIME) / WEEK * WEEK;
       uint balance;
 
-      for(uint i = 0; i < veNFTs.length; i++){
+      // start at an arbitrary point in the list
+      // so we can't get stuck
+      uint startidx = block.timestamp % veNFTs.length;
+      uint i = startidx;
+
+      do {
         veNFT = veNFTs[i];
         lockEnd = veTetu(VETETU).lockedEnd(veNFT);
         balance = balances[veNFT];
@@ -234,16 +238,11 @@ contract veTetuRelocker is OpsReady {
         if (targetTime > lockEnd 
             && lockEnd > block.timestamp 
             && balance >= MIN_ALLOWANCE 
-            && veTetu(VETETU).isApprovedOrOwner(relocker, veNFT) 
-            && isOffCooldown(veNFT)) {
-          return (true, veNFT);
-        }
-      }
+            && veTetu(VETETU).isApprovedOrOwner(relocker, veNFT)) 
+          { return (true, veNFT); }
+        i = (i + 1) % veNFTs.length;
+        } while(i != startidx);
       return (false, 0);
-    }
-
-    function isOffCooldown(uint veNFT) public view returns (bool) {
-      return (coolDown[veNFT] == 0 || coolDown[veNFT] >= block.timestamp);
     }
     
     // for gelato resolver
@@ -265,13 +264,7 @@ contract veTetuRelocker is OpsReady {
       require(!paused);
       require(isRegistered(veNFT));
 
-      try veTetuRelockerProxy(relocker).maxLock(veNFT) { } catch {
-          // if increasing the unlock fails, try again in a day
-          // in practice this shouldn't happen, but it's technically
-          // possible
-          coolDown[veNFT] = block.timestamp + 1 days;
-        }
-
+      veTetuRelockerProxy(relocker).maxLock(veNFT);
       // pay fees
       (uint256 fee,address feeToken) = _getFeeDetails();
       require(feeToken == ETH);

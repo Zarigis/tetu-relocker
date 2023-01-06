@@ -76,9 +76,10 @@ contract veTetuRelockerTest is Test {
         vm.stopPrank();
         vm.startPrank(c.dedicatedMsgSender());
         // sets cooldown, since the lock increase will fail
-        c.processLock(veNFT);
-        require (c.coolDown(veNFT) == block.timestamp + 1 days);
-        // on cooldown
+
+        (bool b, ) = address(c).call(abi.encodeCall(c.processLock, (veNFT)));
+        // fail to process lock
+        require (!b);
         (bool canExec2,) = c.checker();
         require(!canExec2);
         vm.warp(block.timestamp + 1 days);
