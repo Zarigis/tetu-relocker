@@ -14,6 +14,28 @@ interface veTetu {
   function ownerOf(uint _tokenId) external view returns (address);
   function lockedEnd(uint _tokenId) external view returns (uint);
   function setApprovalForAll(address _operator, bool _approved) external;
+  function tokenOfOwnerByIndex(address _owner, uint _tokenIndex) external view returns (uint);
+}
+
+
+// simple proxy contract that users can defer relocking capabilities to.
+// this is just safety measure to ensure that the operator authority
+// can't be abused
+contract veTetuRelockerProxy {
+  address public constant VETETU = 0x6FB29DD17fa6E27BD112Bc3A2D0b8dae597AeDA4;
+  address public immutable operator;
+  uint public constant MAX_TIME = 16 weeks;
+
+  constructor(address _operator) { 
+    operator = _operator;
+  }
+
+  function maxLock(uint veNFT) external returns (bool) {
+    require(msg.sender == operator);
+    veTetu(VETETU).increaseUnlockTime(veNFT, MAX_TIME);
+    return true;
+  }
+
 }
 
 
@@ -23,7 +45,9 @@ contract veTetuRelocker is OpsReady {
 
     uint internal constant MAX_TIME = 16 weeks;
     uint internal constant WEEK = 1 weeks;
-    uint public constant MIN_ALLOWANCE = 1000000000000000000;
+    uint public constant MIN_ALLOWANCE = 500000000000000000;
+    uint public constant MIN_DEPOSIT = 1000000000000000000;
+    address public immutable relocker;
 
     address public operator;
     uint[] public veNFTs;
@@ -31,10 +55,35 @@ contract veTetuRelocker is OpsReady {
     bool public paused = false;
     mapping(uint => uint) public coolDown;
     mapping(uint => uint) public balances;
-    uint totalBalance = 0;
 
     constructor(address ops, address _taskCreator) OpsReady(ops, _taskCreator) {
       operator = _taskCreator;
+      relocker = address(new veTetuRelockerProxy(address(this)));
+    }
+
+    receive() external payable {
+      _registerAll(msg.value);
+    }
+
+    function registerAll() external payable {
+      _registerAll(msg.value);
+    }
+
+    function _registerAll(uint _value) internal {
+      uint i = 0;
+      uint veNFT;
+      uint value = _value;
+      
+      do {
+        veNFT = veTetu(VETETU).tokenOfOwnerByIndex(msg.sender, i++);
+        if(_registerCondition(veNFT, MIN_DEPOSIT)) {
+          require(value >= MIN_DEPOSIT);
+          _register(veNFT, MIN_DEPOSIT);
+          value = value - MIN_DEPOSIT;
+        }
+      }
+      while (veNFT > 0);
+      payable(msg.sender).transfer(value);
     }
 
     function setOperator(address newOperator) external returns (bool) {
@@ -56,33 +105,29 @@ contract veTetuRelocker is OpsReady {
       return true;
     }
 
-
-    function getExcess() external returns (bool) {
-      require(msg.sender == operator);
-      require(address(this).balance > totalBalance);
-      payable(operator).transfer(address(this).balance - totalBalance);
-      return true;
-    }
-
     function _deposit(uint veNFT, uint amount) internal{
       balances[veNFT] = amount + balances[veNFT];
-      totalBalance = amount + totalBalance;
     }
 
     function _withdraw(uint veNFT, uint amount) internal{
       balances[veNFT] = balances[veNFT] - amount;
-      totalBalance = totalBalance - amount;
     }
 
     function register(uint veNFT) external payable returns (uint idx) {
-      // sender must own the NFT
-      require(veTetu(VETETU).isApprovedOrOwner(msg.sender, veNFT));
-      // this contract must be an approved operator of the NFT
-      require(veTetu(VETETU).isApprovedOrOwner(address(this), veNFT));
-      require(!isRegistered(veNFT));
+      require(_registerCondition(veNFT, msg.value));
+      return _register(veNFT, msg.value);
+    }
 
-      _deposit(veNFT, msg.value);
-      require(balances[veNFT] >= MIN_ALLOWANCE);
+    function _registerCondition(uint veNFT, uint value) internal view returns (bool) {
+      return veNFT > 0
+             && veTetu(VETETU).isApprovedOrOwner(msg.sender, veNFT) 
+             && veTetu(VETETU).isApprovedOrOwner(relocker, veNFT)
+             && !isRegistered(veNFT)
+             && ((balances[veNFT] + value) >= MIN_DEPOSIT);
+    }
+
+    function _register(uint veNFT, uint value) internal returns (uint idx) {
+      _deposit(veNFT, value);
 
       idx = veNFTs.length;
       veNFTs.push(veNFT);
@@ -92,18 +137,20 @@ contract veTetuRelocker is OpsReady {
     }
 
     function addToBalance(uint veNFT) external payable returns (bool) {
-      return _addToBalanceFor(veNFT, msg.sender);
+       _addToBalanceFor(veNFT, msg.sender, msg.value);
+       return true;
     }
 
     function addToBalanceFor(uint veNFT, address to) external payable returns (bool) {
-      return _addToBalanceFor(veNFT, to);
+      _addToBalanceFor(veNFT, to, msg.value);
+      return true;
     }
 
-    function _addToBalanceFor(uint veNFT, address to) internal returns (bool) {
+    function _addToBalanceFor(uint veNFT, address to, uint value) internal {
       // doesn't actually enforce anything, just a sanity check
       require(veTetu(VETETU).isApprovedOrOwner(to, veNFT));
-      _deposit(veNFT, msg.value);
-      return true;
+      _deposit(veNFT, value);
+      
     }
 
     function withdrawFromBalance(uint veNFT, uint amount) external returns (bool) {
@@ -132,6 +179,11 @@ contract veTetuRelocker is OpsReady {
 
     function unregister(uint veNFT, address fee_return) public  returns (bool) { 
       require(veTetu(VETETU).isApprovedOrOwner(msg.sender, veNFT));
+      _unregister(veNFT, fee_return);
+      return true;
+    }
+
+    function _unregister(uint veNFT, address fee_return) internal {
       uint idx = veNFTtoIdx(veNFT);
       veNFTs[idx] = veNFTs[veNFTs.length - 1];
       refreshIdx(idx);
@@ -141,12 +193,30 @@ contract veTetuRelocker is OpsReady {
       uint bal = balances[veNFT];
       _withdraw(veNFT, bal);
       payable(fee_return).transfer(bal);
-      return true;
     }
 
     function unregister(uint veNFT) external returns (bool) {
       return unregister(veNFT, msg.sender);
     }
+
+    function unregisterAll() external returns (bool) {
+      return unregisterAll(msg.sender);
+    }
+
+    function unregisterAll(address fee_return) public returns (bool) {
+      uint i = 0;
+      uint veNFT;
+      
+      do {
+        veNFT = veTetu(VETETU).tokenOfOwnerByIndex(msg.sender, i++);
+        if(isRegistered(veNFT)){
+          _unregister(veNFT, fee_return);
+        }
+      }
+      while (veNFT > 0);
+      return true;
+    }
+
 
     function getReadyNFT() public view returns (bool success, uint veNFT) {
       if (paused) {
@@ -161,7 +231,11 @@ contract veTetuRelocker is OpsReady {
         lockEnd = veTetu(VETETU).lockedEnd(veNFT);
         balance = balances[veNFT];
 
-        if (targetTime > lockEnd && balance >= MIN_ALLOWANCE && veTetu(VETETU).isApprovedOrOwner(address(this), veNFT) && isOffCooldown(veNFT)) {
+        if (targetTime > lockEnd 
+            && lockEnd > block.timestamp 
+            && balance >= MIN_ALLOWANCE 
+            && veTetu(VETETU).isApprovedOrOwner(relocker, veNFT) 
+            && isOffCooldown(veNFT)) {
           return (true, veNFT);
         }
       }
@@ -191,7 +265,7 @@ contract veTetuRelocker is OpsReady {
       require(!paused);
       require(isRegistered(veNFT));
 
-      try veTetu(VETETU).increaseUnlockTime(veNFT, MAX_TIME) { } catch {
+      try veTetuRelockerProxy(relocker).maxLock(veNFT) { } catch {
           // if increasing the unlock fails, try again in a day
           // in practice this shouldn't happen, but it's technically
           // possible

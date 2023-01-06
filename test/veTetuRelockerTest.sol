@@ -47,12 +47,16 @@ contract veTetuRelockerTest is Test {
 
         vm.startPrank(USER);
         uint startbalance = payable(USER).balance;
-        veTetu(VETETU).setApprovalForAll(address(c), true);
+        veTetu(VETETU).setApprovalForAll(c.relocker(), true);
         uint sendAmount = c.MIN_ALLOWANCE() * 2;
         c.register{value: sendAmount}(veNFT);
         c.unregister(veNFT);
         require(startbalance == payable(USER).balance);
 
+        payable(c).call{value : sendAmount}("");
+        require(c.balances(veNFT) == c.MIN_DEPOSIT());
+        require(payable(USER).balance == (startbalance - c.MIN_DEPOSIT()));
+        
     }
 
     // testing failure od
@@ -62,7 +66,7 @@ contract veTetuRelockerTest is Test {
         veTetuRelocker c = mkRelocker();
 
         vm.startPrank(USER);
-        veTetu(VETETU).setApprovalForAll(address(c), true);
+        veTetu(VETETU).setApprovalForAll(c.relocker(), true);
         uint sendAmount = c.MIN_ALLOWANCE();
         
         c.register{value: (sendAmount * 3)}(veNFT);
@@ -95,7 +99,7 @@ contract veTetuRelockerTest is Test {
         veTetu(VETETU).increaseUnlockTime(veNFT, 16 weeks);
         vm.warp(block.timestamp + 7 days);
 
-        veTetu(VETETU).setApprovalForAll(address(c), true);
+        veTetu(VETETU).setApprovalForAll(c.relocker(), true);
         // get some WMATIC for fees
         uint sendAmount = c.MIN_ALLOWANCE() * 3;
         c.register{value: sendAmount}(veNFT);
