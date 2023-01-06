@@ -45,8 +45,11 @@ contract veTetuRelocker is OpsReady {
 
     uint internal constant MAX_TIME = 16 weeks;
     uint internal constant WEEK = 1 weeks;
-    uint public constant MIN_ALLOWANCE = 500000000000000000;
-    uint public constant MIN_DEPOSIT = 1000000000000000000;
+    // minimum balance needed to be queued
+    uint public constant MIN_ALLOWANCE = 100000000000000000;
+
+    // default initial deposit amount
+    uint public constant DEFAULT_DEPOSIT = 1000000000000000000;
     address public immutable relocker;
 
     address public operator;
@@ -68,21 +71,36 @@ contract veTetuRelocker is OpsReady {
       _registerAll(msg.value);
     }
 
-    function _registerAll(uint _value) internal {
+    function _registerAll(uint value) internal {
       uint i = 0;
       uint veNFT;
-      uint value = _value;
+
+      uint totalToks = 0;
       
       do {
         veNFT = veTetu(VETETU).tokenOfOwnerByIndex(msg.sender, i++);
-        if(_registerCondition(veNFT, MIN_DEPOSIT)) {
-          require(value >= MIN_DEPOSIT);
-          _register(veNFT, MIN_DEPOSIT);
-          value = value - MIN_DEPOSIT;
+        if(_registerCondition(veNFT)) {
+          require(value >= DEFAULT_DEPOSIT);
+          _register(veNFT, 0);
+          totalToks++;
+        } else if (isRegistered(veNFT) && balances[veNFT] == 0) {
+          totalToks++;
         }
-      }
-      while (veNFT > 0);
-      payable(msg.sender).transfer(value);
+        
+      } while (veNFT > 0);
+
+      require(totalToks > 0);
+
+      if (value == 0) { return; }
+
+      uint perToken = value / totalToks;
+      i = 0;
+      do {
+        veNFT = veTetu(VETETU).tokenOfOwnerByIndex(msg.sender, i++);
+        if (isRegistered(veNFT) && balances[veNFT] == 0) {
+          _deposit(veNFT, perToken);
+        }
+      } while (veNFT > 0);
     }
 
     function setOperator(address newOperator) external returns (bool) {
@@ -113,16 +131,15 @@ contract veTetuRelocker is OpsReady {
     }
 
     function register(uint veNFT) external payable returns (uint idx) {
-      require(_registerCondition(veNFT, msg.value));
+      require(_registerCondition(veNFT));
       return _register(veNFT, msg.value);
     }
 
-    function _registerCondition(uint veNFT, uint value) internal view returns (bool) {
+    function _registerCondition(uint veNFT) internal view returns (bool) {
       return veNFT > 0
              && veTetu(VETETU).isApprovedOrOwner(msg.sender, veNFT) 
              && veTetu(VETETU).isApprovedOrOwner(relocker, veNFT)
-             && !isRegistered(veNFT)
-             && ((balances[veNFT] + value) >= MIN_DEPOSIT);
+             && !isRegistered(veNFT);
     }
 
     function _register(uint veNFT, uint value) internal returns (uint idx) {
@@ -154,7 +171,6 @@ contract veTetuRelocker is OpsReady {
 
     function withdrawFromBalance(uint veNFT, uint amount) external returns (bool) {
       require(veTetu(VETETU).isApprovedOrOwner(msg.sender, veNFT));
-      require(balances[veNFT] >= (amount + MIN_ALLOWANCE));
       _withdraw(veNFT, amount);
       payable(msg.sender).transfer(amount);
       return true;

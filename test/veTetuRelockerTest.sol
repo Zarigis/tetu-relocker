@@ -48,14 +48,15 @@ contract veTetuRelockerTest is Test {
         vm.startPrank(USER);
         uint startbalance = payable(USER).balance;
         veTetu(VETETU).setApprovalForAll(c.relocker(), true);
-        uint sendAmount = c.MIN_ALLOWANCE() * 2;
+        uint sendAmount = c.DEFAULT_DEPOSIT() * 2;
         c.register{value: sendAmount}(veNFT);
         c.unregister(veNFT);
         require(startbalance == payable(USER).balance);
 
-        payable(c).call{value : sendAmount}("");
-        require(c.balances(veNFT) == c.MIN_DEPOSIT());
-        require(payable(USER).balance == (startbalance - c.MIN_DEPOSIT()));
+        (bool b, ) = payable(c).call{value : sendAmount}("");
+        require (b);
+        require(c.balances(veNFT) == sendAmount);
+        require(payable(USER).balance == (startbalance - sendAmount));
         
     }
 
@@ -67,7 +68,7 @@ contract veTetuRelockerTest is Test {
 
         vm.startPrank(USER);
         veTetu(VETETU).setApprovalForAll(c.relocker(), true);
-        uint sendAmount = c.MIN_ALLOWANCE();
+        uint sendAmount = c.DEFAULT_DEPOSIT();
         
         c.register{value: (sendAmount * 3)}(veNFT);
 
@@ -102,7 +103,7 @@ contract veTetuRelockerTest is Test {
 
         veTetu(VETETU).setApprovalForAll(c.relocker(), true);
         // get some WMATIC for fees
-        uint sendAmount = c.MIN_ALLOWANCE() * 3;
+        uint sendAmount = c.DEFAULT_DEPOSIT() * 3;
         c.register{value: sendAmount}(veNFT);
         vm.stopPrank();
 
