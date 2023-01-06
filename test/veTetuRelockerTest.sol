@@ -29,8 +29,6 @@ contract veTetuRelockerTest is Test {
 
     address public constant VETETU = 0x6FB29DD17fa6E27BD112Bc3A2D0b8dae597AeDA4;
     address public constant USER = 0xa68444587ea4D3460BBc11d5aeBc1c817518d648;
-    address public constant WMATIC = 0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270;
-
 
     address public constant OPS = 0x527a819db1eb0e34426297b03bae11F2f8B3A19E;
 
@@ -48,16 +46,12 @@ contract veTetuRelockerTest is Test {
         veTetuRelocker c = mkRelocker();
 
         vm.startPrank(USER);
+        uint startbalance = payable(USER).balance;
         veTetu(VETETU).setApprovalForAll(address(c), true);
         uint sendAmount = c.MIN_ALLOWANCE() * 2;
-        (bool s,) = payable(WMATIC).call{value: sendAmount}("");
-        require (s);
-        IERC20(WMATIC).approve(address(c), type(uint256).max);
-        c.register(veNFT);
-
+        c.register{value: sendAmount}(veNFT);
         c.unregister(veNFT);
-
-
+        require(startbalance == payable(USER).balance);
 
     }
 
@@ -69,29 +63,9 @@ contract veTetuRelockerTest is Test {
 
         vm.startPrank(USER);
         veTetu(VETETU).setApprovalForAll(address(c), true);
-        IERC20(WMATIC).approve(address(c), type(uint256).max);
         uint sendAmount = c.MIN_ALLOWANCE();
-        (bool s,) = payable(WMATIC).call{value: sendAmount}("");
-        require (s);
-
         
-        c.register(veNFT);
-        vm.stopPrank();
-
-        vm.startPrank(c.dedicatedMsgSender());
-
-        // deregisters, since we can't pay the fees
-        c.processLock(veNFT);
-        require (!c.isRegistered(veNFT));
-
-        (bool canExec,) = c.checker();
-        require(!canExec);
-        vm.stopPrank();
-
-        vm.startPrank(USER);
-        (bool s2,) = payable(WMATIC).call{value: (sendAmount * 3)}("");
-        require (s2);
-        c.register(veNFT);
+        c.register{value: (sendAmount * 3)}(veNFT);
 
         veTetu(VETETU).increaseUnlockTime(veNFT, 16 weeks);
 
@@ -122,12 +96,9 @@ contract veTetuRelockerTest is Test {
         vm.warp(block.timestamp + 7 days);
 
         veTetu(VETETU).setApprovalForAll(address(c), true);
-        IERC20(WMATIC).approve(address(c), type(uint256).max);
         // get some WMATIC for fees
         uint sendAmount = c.MIN_ALLOWANCE() * 3;
-        (bool s,) = payable(WMATIC).call{value: sendAmount}("");
-        require (s);
-        c.register(veNFT);
+        c.register{value: sendAmount}(veNFT);
         vm.stopPrank();
 
         vm.startPrank(c.dedicatedMsgSender());
