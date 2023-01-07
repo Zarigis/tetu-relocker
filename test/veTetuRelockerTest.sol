@@ -56,17 +56,7 @@ contract veTetuRelockerTest is Test {
         
         c.unregister(veNFT);
         require(startbalance == payable(USER).balance, "didn't get paid back");
-        uint i = 0;
-        uint _veNFT;
-        do {
-            _veNFT = veTetu(VETETU).tokenOfOwnerByIndex(USER, i++);
-            if (_veNFT > 0) {
-                c.register{value: DEFAULT_DEPOSIT}(_veNFT);
-            } else { break; }
-        } while (true);
-        c.unregister(veNFT);
-        startbalance = payable(USER).balance;
-
+        c.register(veNFT);
         (bool b, ) = payable(c).call{value : sendAmount}("");
         require (b, "failed send");
         require(c.balances(veNFT) == sendAmount, "unexpected balance");

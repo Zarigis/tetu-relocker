@@ -61,21 +61,30 @@ contract veTetuRelocker is OpsReady {
     }
 
     receive() external payable {
-      _registerAll(msg.value);
+      _depositAll(msg.sender, msg.value);
+    }
+
+    function depositAll() external payable {
+      _depositAll(msg.sender, msg.value);
     }
 
     function registerAll() external payable {
-      _registerAll(msg.value);
+      _registerAll(msg.sender, msg.value, MAX_TIME);
     }
 
-    // returns all veNFTs owned by the given user that can be registered
-    function userTokensToBeRegistered(address user) public view returns (uint[] memory) {
+    function registerAll(uint _weeks) external payable {
+      require(_weeks <= 16);
+      _registerAll(msg.sender, msg.value, _weeks * WEEK);
+    }
+
+    // returns all veNFTs registered by the user
+    function userTokens(address user) public view returns (uint[] memory) {
       uint i = 0;
       uint veNFT;
       uint j = 0;
       do { 
         veNFT = veTetu(VETETU).tokenOfOwnerByIndex(user, i++);
-        if (_registerCondition(veNFT)) {
+        if (isRegistered(veNFT)) {
           j++;
         }
       } while (veNFT > 0);
@@ -84,20 +93,32 @@ contract veTetuRelocker is OpsReady {
       j = 0;
       do {
         veNFT = veTetu(VETETU).tokenOfOwnerByIndex(user, i++);
-        if (_registerCondition(veNFT)) {
+        if (isRegistered(veNFT)) {
           toks[j++] = veNFT;
         }
       } while (veNFT > 0);
       return toks;
     }
 
-    function _registerAll(uint value) internal {
-      uint[] memory toks = userTokensToBeRegistered(msg.sender);
+    function _registerAll(address user, uint value, uint duration) internal {
+      uint i = 0;
+      uint veNFT;
+      do { 
+        veNFT = veTetu(VETETU).tokenOfOwnerByIndex(user, i++);
+        if (_registerCondition(veNFT)){
+          _register(veNFT, 0, duration);
+        }
+      } while (veNFT > 0);
+      if (value > 0) { _depositAll(user, value); }
+    }
+
+    function _depositAll(address user, uint value) internal {
+      uint[] memory toks = userTokens(user);
       if (toks.length == 0) { return; }
       uint perToken = value / toks.length;
       uint i;
       for(i = 0; i < toks.length; i++){
-         _register(toks[i], perToken, MAX_TIME);
+        _addToBalanceFor(toks[i], user, perToken);
       }
     }
 
