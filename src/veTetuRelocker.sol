@@ -15,6 +15,7 @@ interface veTetu {
   function lockedEnd(uint _tokenId) external view returns (uint);
   function setApprovalForAll(address _operator, bool _approved) external;
   function tokenOfOwnerByIndex(address _owner, uint _tokenIndex) external view returns (uint);
+  function ownerToOperators(address _owner, address _operator) external view returns (bool);
 }
 
 
@@ -60,19 +61,24 @@ contract veTetuRelocker is OpsReady {
       relocker = address(new veTetuRelockerProxy(address(this)));
     }
 
-    receive() external payable {
+    modifier lockerApproved {
+      require(veTetu(VETETU).ownerToOperators(msg.sender, relocker), "locker contract is not operator");
+      _;
+   }
+
+    receive() external lockerApproved payable {
       _depositAll(msg.sender, msg.value);
     }
 
-    function depositAll() external payable {
+    function depositAll() external lockerApproved payable {
       _depositAll(msg.sender, msg.value);
     }
 
-    function registerAll() external payable {
+    function registerAll() external lockerApproved payable {
       _registerAll(msg.sender, msg.value, MAX_TIME);
     }
 
-    function registerAll(uint _weeks) external payable {
+    function registerAll(uint _weeks) external lockerApproved payable {
       require(_weeks <= 16);
       _registerAll(msg.sender, msg.value, _weeks * WEEK);
     }
@@ -103,18 +109,22 @@ contract veTetuRelocker is OpsReady {
     function _registerAll(address user, uint value, uint duration) internal {
       uint i = 0;
       uint veNFT;
+      bool didRegister = false;
       do { 
         veNFT = veTetu(VETETU).tokenOfOwnerByIndex(user, i++);
         if (_registerCondition(veNFT)){
           _register(veNFT, 0, duration);
+          didRegister = true;
         }
       } while (veNFT > 0);
+      // need to register at least one token
+      require(didRegister);
       if (value > 0) { _depositAll(user, value); }
     }
 
     function _depositAll(address user, uint value) internal {
       uint[] memory toks = userTokens(user);
-      if (toks.length == 0) { return; }
+      require (toks.length > 0);
       uint perToken = value / toks.length;
       uint i;
       for(i = 0; i < toks.length; i++){
