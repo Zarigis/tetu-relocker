@@ -24,15 +24,14 @@ interface veTetu {
 contract veTetuRelockerProxy {
   address public constant VETETU = 0x6FB29DD17fa6E27BD112Bc3A2D0b8dae597AeDA4;
   address public immutable operator;
-  uint public constant MAX_TIME = 16 weeks;
 
   constructor(address _operator) { 
     operator = _operator;
   }
 
-  function maxLock(uint veNFT) external returns (bool) {
+  function relock(uint veNFT, uint duration) external returns (bool) {
     require(msg.sender == operator);
-    veTetu(VETETU).increaseUnlockTime(veNFT, MAX_TIME);
+    veTetu(VETETU).increaseUnlockTime(veNFT, duration);
     return true;
   }
 
@@ -47,9 +46,6 @@ contract veTetuRelocker is OpsReady {
     uint internal constant WEEK = 1 weeks;
     // minimum balance needed to be queued
     uint public constant MIN_ALLOWANCE = 100000000000000000;
-
-    // default initial deposit amount
-    uint public constant DEFAULT_DEPOSIT = 1000000000000000000;
     address public immutable relocker;
 
     address public operator;
@@ -71,36 +67,37 @@ contract veTetuRelocker is OpsReady {
       _registerAll(msg.value);
     }
 
-    function _registerAll(uint value) internal {
+    // returns all veNFTs owned by the given user that can be registered
+    function userTokensToBeRegistered(address user) public view returns (uint[] memory) {
       uint i = 0;
       uint veNFT;
-
-      uint totalToks = 0;
-      
-      do {
-        veNFT = veTetu(VETETU).tokenOfOwnerByIndex(msg.sender, i++);
-        if(_registerCondition(veNFT)) {
-          require(value >= DEFAULT_DEPOSIT);
-          _register(veNFT, 0);
-          totalToks++;
-        } else if (isRegistered(veNFT) && balances[veNFT] == 0) {
-          totalToks++;
+      uint j = 0;
+      do { 
+        veNFT = veTetu(VETETU).tokenOfOwnerByIndex(user, i++);
+        if (_registerCondition(veNFT)) {
+          j++;
         }
-        
       } while (veNFT > 0);
-
-      require(totalToks > 0);
-
-      if (value == 0) { return; }
-
-      uint perToken = value / totalToks;
+      uint[] memory toks = new uint[](j);
       i = 0;
+      j = 0;
       do {
-        veNFT = veTetu(VETETU).tokenOfOwnerByIndex(msg.sender, i++);
-        if (isRegistered(veNFT) && balances[veNFT] == 0) {
-          _deposit(veNFT, perToken);
+        veNFT = veTetu(VETETU).tokenOfOwnerByIndex(user, i++);
+        if (_registerCondition(veNFT)) {
+          toks[j++] = veNFT;
         }
       } while (veNFT > 0);
+      return toks;
+    }
+
+    function _registerAll(uint value) internal {
+      uint[] memory toks = userTokensToBeRegistered(msg.sender);
+      if (toks.length == 0) { return; }
+      uint perToken = value / toks.length;
+      uint i;
+      for(i = 0; i < toks.length; i++){
+         _register(toks[i], perToken);
+      }
     }
 
     function setOperator(address newOperator) external returns (bool) {
@@ -232,14 +229,23 @@ contract veTetuRelocker is OpsReady {
       return true;
     }
 
+    function floor(uint a, uint m) pure internal returns (uint ) {
+      return (a / m) * m;
+    }
+
+    function roundDurationUp(uint veNFT) public view returns (uint) {
+      uint lockEnd = veTetu(VETETU).lockedEnd(veNFT);
+      return (lockEnd - (floor(block.timestamp, WEEK))) + WEEK;
+    }
+
 
     function getReadyNFT() public view returns (bool success, uint veNFT) {
-      if (paused) {
+      if (paused || veNFTs.length == 0) {
         return (false, 0);
       }
       uint lockEnd;
-      uint targetTime = (block.timestamp + MAX_TIME) / WEEK * WEEK;
       uint balance;
+      uint duration;
 
       // start at an arbitrary point in the list
       // so we can't get stuck
@@ -250,9 +256,11 @@ contract veTetuRelocker is OpsReady {
         veNFT = veNFTs[i];
         lockEnd = veTetu(VETETU).lockedEnd(veNFT);
         balance = balances[veNFT];
+        duration = roundDurationUp(veNFT);
 
-        if (targetTime > lockEnd 
-            && lockEnd > block.timestamp 
+        if ( duration <= MAX_TIME
+            && floor(block.timestamp + duration, WEEK) > lockEnd
+            && lockEnd > block.timestamp
             && balance >= MIN_ALLOWANCE 
             && veTetu(VETETU).isApprovedOrOwner(relocker, veNFT)) 
           { return (true, veNFT); }
@@ -280,8 +288,8 @@ contract veTetuRelocker is OpsReady {
       require(!paused);
       require(isRegistered(veNFT));
 
-      veTetuRelockerProxy(relocker).maxLock(veNFT);
-      // pay fees
+      veTetuRelockerProxy(relocker).relock(veNFT, roundDurationUp(veNFT));
+
       (uint256 fee,address feeToken) = _getFeeDetails();
       require(feeToken == ETH);
       _withdraw(veNFT, fee);
