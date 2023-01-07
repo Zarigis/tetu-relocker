@@ -53,6 +53,7 @@ contract veTetuRelocker is OpsReady {
     mapping(uint => uint) internal _veNFTtoIdx;
     bool public paused = false;
     mapping(uint => uint) public balances;
+    mapping(uint => uint) public lockTime;
 
     constructor(address ops, address _taskCreator) OpsReady(ops, _taskCreator) {
       operator = _taskCreator;
@@ -96,7 +97,7 @@ contract veTetuRelocker is OpsReady {
       uint perToken = value / toks.length;
       uint i;
       for(i = 0; i < toks.length; i++){
-         _register(toks[i], perToken);
+         _register(toks[i], perToken, MAX_TIME);
       }
     }
 
@@ -129,7 +130,13 @@ contract veTetuRelocker is OpsReady {
 
     function register(uint veNFT) external payable returns (uint idx) {
       require(_registerCondition(veNFT));
-      return _register(veNFT, msg.value);
+      return _register(veNFT, msg.value, MAX_TIME);
+    }
+
+    function register(uint veNFT, uint _weeks) external payable returns (uint idx) {
+      require(_registerCondition(veNFT));
+      require (_weeks <= 16);
+      return _register(veNFT, msg.value, _weeks * WEEK);
     }
 
     function _registerCondition(uint veNFT) internal view returns (bool) {
@@ -139,13 +146,13 @@ contract veTetuRelocker is OpsReady {
              && !isRegistered(veNFT);
     }
 
-    function _register(uint veNFT, uint value) internal returns (uint idx) {
+    function _register(uint veNFT, uint value, uint duration) internal returns (uint idx) {
       _deposit(veNFT, value);
 
       idx = veNFTs.length;
       veNFTs.push(veNFT);
       refreshIdx(idx);
-      
+      lockTime[veNFT] = duration;
       return idx;
     }
 
@@ -170,6 +177,13 @@ contract veTetuRelocker is OpsReady {
       require(veTetu(VETETU).isApprovedOrOwner(msg.sender, veNFT));
       _withdraw(veNFT, amount);
       payable(msg.sender).transfer(amount);
+      return true;
+    }
+
+    function setLockTIme(uint veNFT, uint _weeks) external returns (bool) {
+      require(veTetu(VETETU).isApprovedOrOwner(msg.sender, veNFT));
+      require (_weeks <= 16);
+      lockTime[veNFT] = _weeks * WEEK;
       return true;
     }
 
@@ -233,19 +247,12 @@ contract veTetuRelocker is OpsReady {
       return (a / m) * m;
     }
 
-    function roundDurationUp(uint veNFT) public view returns (uint) {
-      uint lockEnd = veTetu(VETETU).lockedEnd(veNFT);
-      return (lockEnd - (floor(block.timestamp, WEEK))) + WEEK;
-    }
-
-
     function getReadyNFT() public view returns (bool success, uint veNFT) {
       if (paused || veNFTs.length == 0) {
         return (false, 0);
       }
       uint lockEnd;
       uint balance;
-      uint duration;
 
       // start at an arbitrary point in the list
       // so we can't get stuck
@@ -256,10 +263,8 @@ contract veTetuRelocker is OpsReady {
         veNFT = veNFTs[i];
         lockEnd = veTetu(VETETU).lockedEnd(veNFT);
         balance = balances[veNFT];
-        duration = roundDurationUp(veNFT);
 
-        if ( duration <= MAX_TIME
-            && floor(block.timestamp + duration, WEEK) > lockEnd
+        if (   floor(block.timestamp + lockTime[veNFT], WEEK) > lockEnd
             && lockEnd > block.timestamp
             && balance >= MIN_ALLOWANCE 
             && veTetu(VETETU).isApprovedOrOwner(relocker, veNFT)) 
@@ -288,7 +293,7 @@ contract veTetuRelocker is OpsReady {
       require(!paused);
       require(isRegistered(veNFT));
 
-      veTetuRelockerProxy(relocker).relock(veNFT, roundDurationUp(veNFT));
+      veTetuRelockerProxy(relocker).relock(veNFT, lockTime[veNFT]);
 
       (uint256 fee,address feeToken) = _getFeeDetails();
       require(feeToken == ETH);

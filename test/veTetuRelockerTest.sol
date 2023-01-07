@@ -24,7 +24,7 @@ contract FakeOps {
 }
 
 contract veTetuRelockerTest is Test {
-    uint256 constant FORK_BLOCK_NUMBER = 37760339;
+    uint256 constant FORK_BLOCK_NUMBER = 37769178;
     string MATIC_RPC_URL = vm.envString("MATIC_RPC_URL");
 
     address public constant VETETU = 0x6FB29DD17fa6E27BD112Bc3A2D0b8dae597AeDA4;
@@ -74,6 +74,8 @@ contract veTetuRelockerTest is Test {
         
     }
 
+    
+
     // testing failure od
     function testFModes() public {
         vm.createSelectFork(MATIC_RPC_URL, FORK_BLOCK_NUMBER);
@@ -82,10 +84,8 @@ contract veTetuRelockerTest is Test {
         vm.startPrank(USER);
         veTetu(VETETU).setApprovalForAll(c.relocker(), true);
         uint sendAmount = DEFAULT_DEPOSIT;
-        
-        c.register{value: (sendAmount * 3)}(veNFT);
-
         veTetu(VETETU).increaseUnlockTime(veNFT, 16 weeks);
+        c.register{value: (sendAmount * 3)}(veNFT);
 
         vm.stopPrank();
         vm.startPrank(c.dedicatedMsgSender());
@@ -96,18 +96,12 @@ contract veTetuRelockerTest is Test {
         require (!b, "unexpected processLock success");
         (bool canExec2,) = c.checker();
         require(!canExec2, "unexpected canExec success");
-        vm.warp(block.timestamp + 6 days);
+        vm.warp(block.timestamp + 7 days);
         (bool canExec3,  bytes memory payLoad3) = c.checker();
         require(canExec3, "canExec3 failure");
-
+ 
         (bool s3, ) = address(c).call(payLoad3);
         require (s3, "lock failure");
-        vm.warp(block.timestamp + 15 days);
-        uint end = veTetu(VETETU).lockedEnd(veNFT);
-        c.processLock(veNFT);
-        // locks only round up, if the lock goes down too much users
-        // need to manually increase the lock time
-        require (veTetu(VETETU).lockedEnd(veNFT) == (end + 1 weeks));
     }
 
     function testLockerLogic() public {
@@ -116,12 +110,11 @@ contract veTetuRelockerTest is Test {
 
         vm.startPrank(USER);
         veTetu(VETETU).increaseUnlockTime(veNFT, 16 weeks);
-        vm.warp(block.timestamp + 6 days);
-
         veTetu(VETETU).setApprovalForAll(c.relocker(), true);
-        // get some WMATIC for fees
         uint sendAmount = DEFAULT_DEPOSIT * 3;
         c.register{value: sendAmount}(veNFT);
+
+        vm.warp(block.timestamp + 6 days);  
         vm.stopPrank();
 
         vm.startPrank(c.dedicatedMsgSender());
@@ -136,14 +129,23 @@ contract veTetuRelockerTest is Test {
 
         (bool canExec2, ) = c.checker();
         require (!canExec2, "canExec2 success");
+        vm.stopPrank();
 
-        vm.warp(block.timestamp + 7 days);
 
+        vm.warp(block.timestamp + 15 weeks);
+        vm.startPrank(USER);
+        veTetu(VETETU).increaseUnlockTime(veNFT, 2 weeks);
+        vm.stopPrank();
+
+        vm.startPrank(c.dedicatedMsgSender());
         (bool canExec3, bytes memory payLoad3) = c.checker();
         require (canExec3, "canExec3 failure");
 
         (bool s3, ) = address(c).call(payLoad3);
         require (s3, "s3");
+        vm.warp(block.timestamp + 1 days);
+        (bool canExec4,) = c.checker();
+        require (!canExec4, "canExec4 success");
         
         vm.stopPrank();
     }

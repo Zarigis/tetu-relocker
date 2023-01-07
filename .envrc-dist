@@ -1,6 +1,7 @@
 export ETH_RPC_URL=
-export MATIC_RPC_URL=
+export MATIC_RPC_URL=https://polygon-rpc.com
 export DEPLOYER_KEY=
 export ETHERSCAN_KEY=
 export OPERATOR=
-export OPS=
+export OPS=0x527a819db1eb0e34426297b03bae11F2f8B3A19E
+export GAS_PRICE=200
