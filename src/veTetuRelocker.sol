@@ -7,16 +7,7 @@ pragma solidity ^0.8.13;
 
 import "@openzeppelin/contracts/interfaces/IERC20.sol";
 import "../lib/ops/contracts/integrations/OpsReady.sol";
-
-interface veTetu {
-  function increaseUnlockTime(uint _tokenId, uint _lockDuration) external returns (uint power, uint unlockDate);
-  function isApprovedOrOwner(address _spender, uint _tokenId) external view returns (bool);
-  function ownerOf(uint _tokenId) external view returns (address);
-  function lockedEnd(uint _tokenId) external view returns (uint);
-  function setApprovalForAll(address _operator, bool _approved) external;
-  function tokenOfOwnerByIndex(address _owner, uint _tokenIndex) external view returns (uint);
-  function ownerToOperators(address _owner, address _operator) external view returns (bool);
-}
+import "../interfaces/veTetu.sol";
 
 
 // simple proxy contract that users can defer relocking capabilities to.
